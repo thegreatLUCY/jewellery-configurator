@@ -272,8 +272,18 @@
     // Fix: make the floor asset-aware, from our own idealRadius, instead of a
     // static percentage that only made sense for the asset present when the
     // page was first parsed.
+    //
+    // max-camera-orbit was never bounded at all, which is a second, related
+    // instance of the same root problem: with no ceiling, a normal scroll-zoom
+    // gesture can push the camera to a distance that's astronomically large
+    // relative to the bracelet's ~500x-smaller scale, and swings back just as
+    // hard -- reported as the view "zooming in and out to the extreme". Bounding
+    // both sides, scaled to the CURRENT asset, keeps scroll-zoom sane on every
+    // piece regardless of its absolute size.
     if (idealRadius[currentSrc]) {
-      mv.setAttribute("min-camera-orbit", `auto auto ${idealRadius[currentSrc] * 0.02}m`);
+      const ideal = idealRadius[currentSrc];
+      mv.setAttribute("min-camera-orbit", `auto auto ${ideal * 0.02}m`);
+      mv.setAttribute("max-camera-orbit", `auto auto ${ideal * 4}m`);
     }
 
     // Exactly one camera-orbit assignment + one jumpCameraToGoal() per call,
