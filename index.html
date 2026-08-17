@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<!-- Without this, model-viewer caps pixel density at 1 and renders soft on
+     retina/mobile screens -- a big hit to perceived gem/metal sharpness. -->
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jewellery Configurator</title>
+<!-- 4.x required for KHR_materials_volume (thickness-based absorption),
+     KHR_materials_dispersion (spectral fire) and materials_variants. -->
+<script type="module" src="https://unpkg.com/@google/model-viewer@4.3.1/dist/model-viewer.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #111417;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #eee;
+  }
+  .app {
+    display: flex;
+    height: 100%;
+  }
+  .sidebar {
+    width: 320px;
+    flex: 0 0 320px;
+    height: 100%;
+    overflow-y: auto;
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    border-right: 1px solid rgba(255,255,255,0.08);
+    background: #14171b;
+  }
+  .viewer-pane {
+    flex: 1;
+    height: 100%;
+    position: relative;
+  }
+  model-viewer {
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle at 50% 42%, #2a2f36, #111417 72%);
+    transition: opacity .2s;
+    display: block;
+  }
+  model-viewer.loading { opacity: 0.55; }
+  h1 { font-size: 17px; font-weight: 600; opacity: .92; margin: 0 0 4px; }
+  .row-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+               opacity: .5; margin-bottom: 10px; }
+  .group { display: flex; flex-direction: column; }
+  .group.hidden { display: none; }
+  .swatches { display: flex; gap: 12px; flex-wrap: wrap; }
+  .swatch {
+    width: 40px; height: 40px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.25); cursor: pointer;
+    transition: transform .15s, border-color .15s;
+  }
+  .swatch:hover { transform: scale(1.08); }
+  .swatch.active { border-color: #fff; box-shadow: 0 0 0 2px #14171b, 0 0 0 4px #fff; }
+  .pill {
+    padding: 9px 16px; border-radius: 999px; cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.04); font-size: 13px;
+    transition: border-color .15s, background .15s;
+  }
+  .pill:hover { background: rgba(255,255,255,0.09); }
+  .pill.active { border-color: #fff; background: rgba(255,255,255,0.14); }
+  .row-inline { display: flex; gap: 10px; flex-wrap: wrap; }
+  .shape-btn {
+    width: 50px; height: 50px; border-radius: 10px;
+    border: 2px solid rgba(255,255,255,0.25); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.04);
+    transition: transform .15s, border-color .15s, background .15s;
+  }
+  .shape-btn:hover { transform: scale(1.06); }
+  .shape-btn.active { border-color: #fff; background: rgba(255,255,255,0.12); }
+  .shape-btn svg { width: 23px; height: 23px; }
+  .label { font-size: 11px; opacity: .65; text-align: center; margin-top: 5px; }
+  .col { display: flex; flex-direction: column; align-items: center; }
+  #status { font-size: 11px; opacity: .4; margin-top: auto; padding-top: 12px; }
+
+  @media (max-width: 760px) {
+    .app { flex-direction: column; }
+    .sidebar {
+      width: 100%; flex: 0 0 auto; height: auto; max-height: 46vh;
+      border-right: none; border-bottom: 1px solid rgba(255,255,255,0.08);
+      order: 2;
+    }
+    .viewer-pane { flex: 1 1 auto; order: 1; min-height: 40vh; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar">
+    <h1>Jewellery Configurator</h1>
+
+    <div class="group"><div class="row-label">Piece</div>
+      <div class="row-inline" id="products"></div></div>
+
+    <div class="group" id="shapeGroup"><div class="row-label">Stone Shape</div>
+      <div class="row-inline" id="shapes"></div></div>
+
+    <div class="group"><div class="row-label">Metal</div>
+      <div class="swatches" id="metals"></div></div>
+
+    <div class="group"><div class="row-label">Stone Colour</div>
+      <div class="swatches" id="stones"></div></div>
+
+    <div id="status"></div>
+  </div>
+
+  <div class="viewer-pane">
+    <model-viewer
+      id="viewer"
+      src="ring_round.glb"
+      camera-controls
+      auto-rotate
+      loading="eager"
+      exposure="1.15"
+      shadow-intensity="0.75"
+      shadow-softness="0.85"
+      field-of-view="24deg"
+      min-field-of-view="6deg"
+      environment-image="studio.hdr"
+      tone-mapping="commerce"
+      interaction-prompt="none">
+    </model-viewer>
+  </div>
+</div>
+
+<script>
+  // One GLB per PIECE (and per stone shape, where the shape is real geometry).
+  // Metal and stone colour live inside each file as KHR_materials_variants named
+  // "<Metal>_<Stone>", so both switch instantly with no network request, and the
+  // metals are byte-identical across pieces because one script wrote them all.
+  const products = [
+    { key: "ring",     name: "Ring",     shapes: true  },
+    { key: "bracelet", name: "Bracelet", shapes: false },
+  ];
+
+  const shapes = [
+    { key: "round",    name: "Round",    icon: `<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>` },
+    { key: "princess", name: "Princess", icon: `<rect x="4" y="4" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"/>` },
+  ];
+
+  // `key` must match the metal/stone names baked in by patch_variants.py
+  const metals = [
+    { key: "Yellow", name: "Yellow Gold", swatch: "linear-gradient(135deg,#f4d287,#c8962f)" },
+    { key: "White",  name: "White Gold",  swatch: "linear-gradient(135deg,#f2f3f6,#b9bcc4)" },
+  ];
+
+  const stones = [
+    { key: "Black",     swatch: "#161616" },
+    { key: "Colorless", swatch: "#eef2f7" },
+    { key: "Champagne", swatch: "#9c661a" },
+    { key: "Pink",      swatch: "#dd1f6b" },
+    { key: "Emerald",   swatch: "#0c6b34" },
+  ];
+
+  const state = { product: "ring", shape: "round", metal: "Yellow", stone: "Black" };
+
+  const mv = document.getElementById("viewer");
+  const status = document.getElementById("status");
+  const shapeGroup = document.getElementById("shapeGroup");
+
+  const srcFor = () =>
+    state.product === "ring" ? `ring_${state.shape}.glb` : `${state.product}.glb`;
+
+  function applyVariant() {
+    const want = `${state.metal}_${state.stone}`;
+    // variantName only sticks once the model's variants exist
+    if ((mv.availableVariants || []).includes(want)) mv.variantName = want;
+    status.textContent = `${state.product}${state.product === "ring" ? " · " + state.shape : ""} · ${state.metal} gold · ${state.stone}`;
+  }
+
+  // World-space centre of each piece's stone, so zooming goes to the STONE
+  // rather than the bounding-box centre (which sits in the middle of the band,
+  // making close-ups fly past the gem). Values are the gem mesh's accessor bbox
+  // centre with the exporter's +90deg-X root rotation applied.
+  const stoneTarget = {
+    "ring_round.glb":    "0m 11.90m 0m",
+    "ring_princess.glb": "0m 11.90m 0m",
+    "bracelet.glb":      "0m 0m 0.0457m",
+  };
+
+  // Each asset's own default full-framing camera radius around its stone
+  // target -- i.e. what updateFraming() computes for it. Assets differ in
+  // scale by ~500x (the bracelet is modelled far smaller than the ring), so
+  // an absolute zoom distance from one is meaningless on another; dividing by
+  // THIS turns "how zoomed in" into a fraction that transfers correctly.
+  //
+  // These are hardcoded, not measured live, and that was deliberate after two
+  // failed live approaches:
+  //  1. A per-asset constant measured by calling getCameraOrbit() right after
+  //     updateFraming() -- unreliable, because that read can return a STALE
+  //     value if no real render frame has happened in between; values of 111,
+  //     25 and 5 all came back for the same asset depending on incidental
+  //     timing, none of them wrong so much as read too early.
+  //  2. getDimensions() (bounding-box size) as a live, always-fresh proxy --
+  //     avoids the staleness problem, but is only a proxy: it doesn't capture
+  //     how far the camera TARGET (the stone) sits from the object's own
+  //     centre, which differs between the ring and the bracelet. Sending the
+  //     ring's tight fraction to the bracelet under this proxy landed the
+  //     camera at 0.037m from a target on a 0.06m object -- absurdly far by
+  //     the bracelet's own default (0.23m) -- which is exactly the "bracelet
+  //     is way too zoomed out" bug this was meant to fix.
+  // The values below are updateFraming()'s own result for each asset, so they
+  // already account for the target-offset difference, and are simply
+  // hardcoded to sidestep re-deriving them at runtime through a call whose
+  // readback timing this environment can't be trusted to get right. Confirmed
+  // reproducible: two consecutive getCameraOrbit() reads matched exactly after
+  // forcing a real render frame between the measurement and the read.
+  const idealRadius = {
+    "ring_round.glb":    111.03140762693995,
+    "ring_princess.glb": 111.03140762693995,
+    "bracelet.glb":      0.2318160266396012,
+  };
+
+  // Track the loaded src ourselves. model-viewer's `src` PROPERTY does not
+  // reflect back to the attribute, so comparing against getAttribute("src")
+  // always saw the original value -- round->princess worked, but princess->round
+  // matched the stale attribute and early-returned, so it never switched back.
+  let currentSrc = mv.getAttribute("src");     // what we've most recently REQUESTED
+  let loadedSrc = null;                        // what the camera state ACTUALLY reflects
+
+  // Captured from the CURRENT model right before it's replaced, so the new
+  // model can restore the same view instead of resetting to default framing.
+  let pendingView = null;
+
+  function loadModel() {
+    const next = srcFor();
+    if (currentSrc === next) { applyVariant(); return; }
+
+    // Scale the captured zoom by the asset the camera ACTUALLY reflects right
+    // now (loadedSrc), not whatever was last requested (currentSrc) -- those
+    // differ if a second switch is clicked before the first one's 'load' has
+    // fired, and the camera hasn't moved since loadedSrc's own load. Using
+    // currentSrc there silently mis-scaled a rapid switch between differently-
+    // scaled assets.
+    if (loadedSrc && idealRadius[loadedSrc]) {
+      const o = mv.getCameraOrbit();
+      pendingView = { theta: o.theta, phi: o.phi, zoomFraction: o.radius / idealRadius[loadedSrc] };
+    } else {
+      pendingView = null;
+    }
+
+    currentSrc = next;
+    mv.classList.add("loading");
+    mv.src = next;
+  }
+
+  function focusStone() {
+    // currentSrc is safe to trust here: model-viewer coalesces rapid src
+    // reassignments and only fires 'load' for the most recently requested one.
+    const t = stoneTarget[currentSrc];
+    if (!t) return;
+    mv.cameraTarget = t;
+
+    // min-camera-orbit's "5%" (set once, statically, in the HTML) turned out to
+    // be THE actual bug, not the zoom-transfer maths. It resolves against
+    // something disproportionate to the bracelet's scale -- the bracelet is
+    // ~500x smaller than the ring, and going straight to it from a fresh page
+    // load (updateFraming(), no custom zoom involved at all) landed at the same
+    // stuck radius (~1.31) this whole investigation kept circling back to. That
+    // is a floor roughly 5.6x LARGER than the bracelet's own correctly-measured
+    // full-framing distance (0.23), so it was silently overriding both the
+    // default framing AND every rescaled zoom we tried to apply to it.
+    // Fix: make the floor asset-aware, from our own idealRadius, instead of a
+    // static percentage that only made sense for the asset present when the
+    // page was first parsed.
+    if (idealRadius[currentSrc]) {
+      mv.setAttribute("min-camera-orbit", `auto auto ${idealRadius[currentSrc] * 0.02}m`);
+    }
+
+    // Exactly one camera-orbit assignment + one jumpCameraToGoal() per call,
+    // whichever branch runs -- never both.
+    //
+    // Radius is given in absolute metres, using our own idealRadius constants
+    // on both ends. A percentage radius was tried and abandoned: it turned out
+    // to resolve relative to whatever the camera's CURRENT radius already was
+    // at assignment time, not a fixed ideal-for-this-asset distance -- i.e. an
+    // incremental zoom control, not the fixed per-asset reference this needs.
+    if (pendingView && idealRadius[currentSrc]) {
+      // Same viewing angle, same relative zoom -- just rescaled to this asset.
+      const r = pendingView.zoomFraction * idealRadius[currentSrc];
+      mv.cameraOrbit = `${pendingView.theta}rad ${pendingView.phi}rad ${r}m`;
+      mv.jumpCameraToGoal();
+    } else if (typeof mv.updateFraming === "function") {
+      // First load, or an asset with no known ideal radius: default framing.
+      mv.updateFraming();
+      mv.jumpCameraToGoal();
+    }
+
+    pendingView = null;
+    loadedSrc = currentSrc;
+  }
+
+  function mkRow(host, items, isActive, onPick, render) {
+    host.innerHTML = "";
+    items.forEach(it => {
+      const col = document.createElement("div"); col.className = "col";
+      const btn = render(it);
+      if (isActive(it)) btn.classList.add("active");
+      btn.addEventListener("click", () => {
+        onPick(it);
+        [...host.querySelectorAll(".pill,.swatch,.shape-btn")].forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+      });
+      col.appendChild(btn);
+      if (it.name && !btn.textContent) {
+        const l = document.createElement("div"); l.className = "label"; l.textContent = it.name;
+        col.appendChild(l);
+      } else if (!it.name) {
+        const l = document.createElement("div"); l.className = "label"; l.textContent = it.key;
+        col.appendChild(l);
+      }
+      host.appendChild(col);
+    });
+  }
+
+  function syncShapeVisibility() {
+    const p = products.find(p => p.key === state.product);
+    shapeGroup.classList.toggle("hidden", !p.shapes);
+  }
+
+  mkRow(document.getElementById("products"), products,
+    it => it.key === state.product,
+    it => { state.product = it.key; syncShapeVisibility(); loadModel(); },
+    it => { const b = document.createElement("div"); b.className = "pill"; b.textContent = it.name; return b; });
+
+  mkRow(document.getElementById("shapes"), shapes,
+    it => it.key === state.shape,
+    it => { state.shape = it.key; loadModel(); },
+    it => { const b = document.createElement("div"); b.className = "shape-btn";
+            b.innerHTML = `<svg viewBox="0 0 24 24">${it.icon}</svg>`; b.title = it.name; return b; });
+
+  mkRow(document.getElementById("metals"), metals,
+    it => it.key === state.metal,
+    it => { state.metal = it.key; applyVariant(); },
+    it => { const b = document.createElement("div"); b.className = "swatch";
+            b.style.background = it.swatch; b.title = it.name; return b; });
+
+  mkRow(document.getElementById("stones"), stones,
+    it => it.key === state.stone,
+    it => { state.stone = it.key; applyVariant(); },
+    it => { const b = document.createElement("div"); b.className = "swatch";
+            b.style.background = it.swatch; b.title = it.key; return b; });
+
+  // Re-apply the chosen metal+stone after any load so choices survive a piece
+  // or shape change.
+  //
+  // focusStone() is deferred one animation frame past 'load', not called
+  // synchronously in the handler. 'load' firing doesn't guarantee model-viewer's
+  // internal framing/camera-controls subsystem has finished settling from the
+  // just-completed swap -- calling jumpCameraToGoal() synchronously in the load
+  // handler produced a camera-orbit read a tick later that didn't match what was
+  // just assigned (a stale in-between state), consistently reproducible. One rAF
+  // is enough for it to settle, and is imperceptible (~16ms) to a real user.
+  mv.addEventListener("load", () => {
+    mv.classList.remove("loading");
+    applyVariant();
+    requestAnimationFrame(focusStone);
+  });
+  syncShapeVisibility();
+
+  // Safety net: model-viewer gates loading on an IntersectionObserver, so if that
+  // never fires (odd embeddings, some headless/automation contexts) the model
+  // silently never loads. dismissPoster() sets the same preload flag the observer
+  // would, so force it if we are still unloaded shortly after a src change.
+  function ensureLoaded() {
+    if (!mv.loaded) { try { mv.dismissPoster(); } catch (e) {} }
+  }
+  setTimeout(ensureLoaded, 1500);
+
+  // Warm the HTTP cache for the other pieces once the first one is up. Switching
+  // shape/piece is a real model fetch, and on a cold cache the couple of seconds
+  // of dimmed viewer reads as "the button did nothing". Prefetched, the swap is
+  // effectively instant on every click after the first.
+  window.addEventListener("load", () => {
+    setTimeout(() => {
+      ["ring_round.glb", "ring_princess.glb", "bracelet.glb"]
+        .filter(f => f !== srcFor())
+        .forEach(f => fetch(f, { cache: "force-cache" }).catch(() => {}));
+    }, 2000);
+  });
+  new MutationObserver(() => setTimeout(ensureLoaded, 1500))
+    .observe(mv, { attributes: true, attributeFilter: ["src"] });
+</script>
+</body>
+</html>
