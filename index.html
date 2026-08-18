@@ -218,10 +218,14 @@
 
     /* The stacked layout's sidebar is short enough that a tooltip anchored
        below a near-the-fold target (e.g. Metal) has nowhere to go without
-       overlapping the very control it's pointing at. A fixed top banner
-       sidesteps that entirely -- always visible, never covers a control. */
+       overlapping the very control it's pointing at. A fixed banner
+       sidesteps that -- but pinned to the viewport's true top it floated
+       over the 3D viewer with no visual link to the controls in the sidebar
+       below it. `top` is set from JS instead (see positionTour), right at
+       the sidebar's own top edge, so the banner reads as "guidance for the
+       panel right under me" rather than a stray notice over the model. */
     .tour { position: fixed !important; left: 12px !important; right: 12px;
-            top: 12px !important; width: auto; max-width: none; }
+            width: auto; max-width: none; }
     .tour .tour-arrow { display: none; }
   }
 
@@ -720,6 +724,17 @@
       top = r.top - th - 14;
       left = r.left;
     }
+    // On mobile the banner ignores all of the above per-step math (CSS pins
+    // left/right full-width) -- except top, which used to be a flat 12px
+    // from the true viewport edge. That floated it over the 3D viewer with
+    // no visual link to the sidebar controls it's actually describing.
+    // Anchor it to the sidebar's own top edge instead, so it reads as a
+    // caption for the panel directly beneath it.
+    if (isMobile()) {
+      const sidebarTop = document.querySelector(".sidebar").getBoundingClientRect().top;
+      top = Math.max(12, sidebarTop - th - 12);
+    }
+
     // Keep it on-screen on narrow viewports.
     left = Math.max(12, Math.min(left, window.innerWidth - tw - 12));
     top = Math.max(12, Math.min(top, window.innerHeight - th - 12));
