@@ -192,6 +192,16 @@
     .viewer-pane { flex: 1 1 auto; order: 1; min-height: 38vh; }
     .view-hint { display: none; }
 
+    /* Comfortable touch targets: 38px swatches and slim pills are fine for a
+       mouse cursor but sit under the ~44px minimum that Apple/Material both
+       recommend for a fingertip -- bump them up on mobile without changing
+       the tighter, denser desktop look. */
+    .swatch { width: 44px; height: 44px; }
+    .pill { padding: 12px 20px; }
+    .shape-btn { width: 52px; height: 52px; }
+    .swatches { gap: 15px; }
+    .tour-replay { width: 40px; height: 40px; }
+
     /* The stacked layout's sidebar is short enough that a tooltip anchored
        below a near-the-fold target (e.g. Metal) has nowhere to go without
        overlapping the very control it's pointing at. A fixed top banner
@@ -510,8 +520,24 @@
       const r = pendingView.zoomFraction * idealRadius[currentSrc];
       mv.cameraOrbit = `${pendingView.theta}rad ${pendingView.phi}rad ${r}m`;
       mv.jumpCameraToGoal();
+    } else if (idealRadius[currentSrc]) {
+      // True first load of a known asset (nothing captured to restore yet).
+      // updateFraming()'s default lands dead-on front (theta 0deg, phi 75deg)
+      // -- confirmed by reading getCameraOrbit() after a forced render frame.
+      // A symmetric piece viewed perfectly head-on barely appears to change
+      // for the first stretch of auto-rotate (a torus rotating away from a
+      // straight-on view foreshortens very slowly at first), which read as
+      // "the ring isn't spinning" even though it technically was -- next to
+      // the bracelet, whose default framing happens to already sit off-axis
+      // enough that its rotation is obvious immediately. Starting every piece
+      // at a three-quarter angle instead makes the spin read from frame one,
+      // and looks better as a static shot too. Radius is our own hardcoded
+      // ideal (see idealRadius above) rather than whatever updateFraming()
+      // just computed, for the same staleness reason documented there.
+      mv.cameraOrbit = `25deg 75deg ${idealRadius[currentSrc]}m`;
+      mv.jumpCameraToGoal();
     } else if (typeof mv.updateFraming === "function") {
-      // First load, or an asset with no known ideal radius: default framing.
+      // Unknown asset with no hardcoded ideal radius: fall back to default framing.
       mv.updateFraming();
       mv.jumpCameraToGoal();
     }
